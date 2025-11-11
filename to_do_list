@@ -1,0 +1,617 @@
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <time.h>
+
+#define MAX_TASKS 100
+#define MAX_LENGTH 200
+#define FILENAME "todo_data.txt"
+
+// Structure for Date
+typedef struct {
+    int day;
+    int month;
+    int year;
+} Date;
+
+// Structure for Task
+typedef struct {
+    int id;
+    char description[MAX_LENGTH];
+    int priority; // 1-5 where 5 is highest
+    Date due_date;
+    int completed;
+    char category[MAX_LENGTH];
+    Date created_date;
+} Task;
+
+// Global variables
+Task tasks[MAX_TASKS];
+int task_count = 0;
+int next_id = 1;
+
+// Function prototypes
+void display_menu();
+void add_task();
+void view_tasks();
+void view_tasks_by_priority();
+void view_tasks_by_category();
+void view_completed_tasks();
+void view_pending_tasks();
+void mark_task_complete();
+void delete_task();
+void edit_task();
+void search_tasks();
+void save_tasks();
+void load_tasks();
+void generate_report();
+int validate_date(int day, int month, int year);
+Date get_current_date();
+int compare_dates(Date d1, Date d2);
+void clear_input_buffer();
+void print_task_header();
+void print_task(Task task);
+
+int main() {
+    load_tasks();
+    
+    printf("========================================\n");
+    printf("      TO-DO LIST MANAGER v2.0\n");
+    printf("========================================\n");
+    
+    int choice;
+    
+    do {
+        display_menu();
+        printf("Enter your choice (1-13): ");
+        
+        if (scanf("%d", &choice) != 1) {
+            printf("Invalid input! Please enter a number.\n");
+            clear_input_buffer();
+            continue;
+        }
+        
+        clear_input_buffer();
+        
+        switch(choice) {
+            case 1:
+                add_task();
+                break;
+            case 2:
+                view_tasks();
+                break;
+            case 3:
+                view_tasks_by_priority();
+                break;
+            case 4:
+                view_tasks_by_category();
+                break;
+            case 5:
+                view_completed_tasks();
+                break;
+            case 6:
+                view_pending_tasks();
+                break;
+            case 7:
+                mark_task_complete();
+                break;
+            case 8:
+                delete_task();
+                break;
+            case 9:
+                edit_task();
+                break;
+            case 10:
+                search_tasks();
+                break;
+            case 11:
+                generate_report();
+                break;
+            case 12:
+                save_tasks();
+                printf("Tasks saved successfully!\n");
+                break;
+            case 13:
+                save_tasks();
+                printf("Thank you for using To-Do List Manager!\n");
+                break;
+            default:
+                printf("Invalid choice! Please try again.\n");
+        }
+        
+        printf("\nPress Enter to continue...");
+        getchar();
+        
+    } while(choice != 13);
+    
+    return 0;
+}
+
+void display_menu() {
+    printf("\n========================================\n");
+    printf("              MAIN MENU\n");
+    printf("========================================\n");
+    printf("1. Add New Task\n");
+    printf("2. View All Tasks\n");
+    printf("3. View Tasks by Priority\n");
+    printf("4. View Tasks by Category\n");
+    printf("5. View Completed Tasks\n");
+    printf("6. View Pending Tasks\n");
+    printf("7. Mark Task as Complete\n");
+    printf("8. Delete Task\n");
+    printf("9. Edit Task\n");
+    printf("10. Search Tasks\n");
+    printf("11. Generate Report\n");
+    printf("12. Save Tasks\n");
+    printf("13. Exit\n");
+    printf("========================================\n");
+}
+
+void add_task() {
+    if (task_count >= MAX_TASKS) {
+        printf("Task limit reached! Cannot add more tasks.\n");
+        return;
+    }
+    
+    Task new_task;
+    new_task.id = next_id++;
+    new_task.completed = 0;
+    new_task.created_date = get_current_date();
+    
+    printf("\n--- Add New Task ---\n");
+    
+    // Get task description
+    printf("Enter task description: ");
+    fgets(new_task.description, MAX_LENGTH, stdin);
+    new_task.description[strcspn(new_task.description, "\n")] = 0;
+    
+    if (strlen(new_task.description) == 0) {
+        printf("Task description cannot be empty!\n");
+        return;
+    }
+    
+    // Get priority
+    printf("Enter priority (1-5, where 5 is highest): ");
+    scanf("%d", &new_task.priority);
+    clear_input_buffer();
+    
+    if (new_task.priority < 1 || new_task.priority > 5) {
+        printf("Invalid priority! Setting to default (3).\n");
+        new_task.priority = 3;
+    }
+    
+    // Get category
+    printf("Enter category: ");
+    fgets(new_task.category, MAX_LENGTH, stdin);
+    new_task.category[strcspn(new_task.category, "\n")] = 0;
+    
+    if (strlen(new_task.category) == 0) {
+        strcpy(new_task.category, "General");
+    }
+    
+    // Get due date
+    printf("Enter due date (DD MM YYYY): ");
+    int day, month, year;
+    scanf("%d %d %d", &day, &month, &year);
+    clear_input_buffer();
+    
+    if (validate_date(day, month, year)) {
+        new_task.due_date.day = day;
+        new_task.due_date.month = month;
+        new_task.due_date.year = year;
+    } else {
+        printf("Invalid date! Setting to current date.\n");
+        new_task.due_date = get_current_date();
+    }
+    
+    tasks[task_count++] = new_task;
+    printf("Task added successfully! (ID: %d)\n", new_task.id);
+}
+
+void view_tasks() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    printf("\n--- All Tasks ---\n");
+    print_task_header();
+    
+    for (int i = 0; i < task_count; i++) {
+        print_task(tasks[i]);
+    }
+}
+
+void view_tasks_by_priority() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    int priority;
+    printf("Enter priority level to view (1-5): ");
+    scanf("%d", &priority);
+    clear_input_buffer();
+    
+    if (priority < 1 || priority > 5) {
+        printf("Invalid priority level!\n");
+        return;
+    }
+    
+    printf("\n--- Tasks with Priority %d ---\n", priority);
+    print_task_header();
+    
+    int found = 0;
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].priority == priority) {
+            print_task(tasks[i]);
+            found = 1;
+        }
+    }
+    
+    if (!found) {
+        printf("No tasks found with priority %d.\n", priority);
+    }
+}
+
+void view_tasks_by_category() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    char category[MAX_LENGTH];
+    printf("Enter category to view: ");
+    fgets(category, MAX_LENGTH, stdin);
+    category[strcspn(category, "\n")] = 0;
+    
+    printf("\n--- Tasks in Category: %s ---\n", category);
+    print_task_header();
+    
+    int found = 0;
+    for (int i = 0; i < task_count; i++) {
+        if (strcasecmp(tasks[i].category, category) == 0) {
+            print_task(tasks[i]);
+            found = 1;
+        }
+    }
+    
+    if (!found) {
+        printf("No tasks found in category '%s'.\n", category);
+    }
+}
+
+void view_completed_tasks() {
+    printf("\n--- Completed Tasks ---\n");
+    print_task_header();
+    
+    int found = 0;
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].completed) {
+            print_task(tasks[i]);
+            found = 1;
+        }
+    }
+    
+    if (!found) {
+        printf("No completed tasks found.\n");
+    }
+}
+
+void view_pending_tasks() {
+    printf("\n--- Pending Tasks ---\n");
+    print_task_header();
+    
+    int found = 0;
+    for (int i = 0; i < task_count; i++) {
+        if (!tasks[i].completed) {
+            print_task(tasks[i]);
+            found = 1;
+        }
+    }
+    
+    if (!found) {
+        printf("No pending tasks found.\n");
+    }
+}
+
+void mark_task_complete() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    int id;
+    printf("Enter task ID to mark as complete: ");
+    scanf("%d", &id);
+    clear_input_buffer();
+    
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].id == id) {
+            if (tasks[i].completed) {
+                printf("Task is already completed!\n");
+            } else {
+                tasks[i].completed = 1;
+                printf("Task marked as complete!\n");
+            }
+            return;
+        }
+    }
+    
+    printf("Task with ID %d not found!\n", id);
+}
+
+void delete_task() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    int id;
+    printf("Enter task ID to delete: ");
+    scanf("%d", &id);
+    clear_input_buffer();
+    
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].id == id) {
+            // Shift tasks to fill the gap
+            for (int j = i; j < task_count - 1; j++) {
+                tasks[j] = tasks[j + 1];
+            }
+            task_count--;
+            printf("Task deleted successfully!\n");
+            return;
+        }
+    }
+    
+    printf("Task with ID %d not found!\n", id);
+}
+
+void edit_task() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    int id;
+    printf("Enter task ID to edit: ");
+    scanf("%d", &id);
+    clear_input_buffer();
+    
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].id == id) {
+            printf("\nEditing Task ID: %d\n", id);
+            printf("Current description: %s\n", tasks[i].description);
+            printf("Enter new description (or press Enter to keep current): ");
+            char new_desc[MAX_LENGTH];
+            fgets(new_desc, MAX_LENGTH, stdin);
+            new_desc[strcspn(new_desc, "\n")] = 0;
+            
+            if (strlen(new_desc) > 0) {
+                strcpy(tasks[i].description, new_desc);
+            }
+            
+            printf("Current priority: %d\n", tasks[i].priority);
+            printf("Enter new priority (1-5): ");
+            char priority_input[10];
+            fgets(priority_input, 10, stdin);
+            if (strlen(priority_input) > 1) {
+                int new_priority = atoi(priority_input);
+                if (new_priority >= 1 && new_priority <= 5) {
+                    tasks[i].priority = new_priority;
+                }
+            }
+            
+            printf("Task updated successfully!\n");
+            return;
+        }
+    }
+    
+    printf("Task with ID %d not found!\n", id);
+}
+
+void search_tasks() {
+    if (task_count == 0) {
+        printf("No tasks available!\n");
+        return;
+    }
+    
+    char keyword[MAX_LENGTH];
+    printf("Enter search keyword: ");
+    fgets(keyword, MAX_LENGTH, stdin);
+    keyword[strcspn(keyword, "\n")] = 0;
+    
+    if (strlen(keyword) == 0) {
+        printf("Search keyword cannot be empty!\n");
+        return;
+    }
+    
+    printf("\n--- Search Results for '%s' ---\n", keyword);
+    print_task_header();
+    
+    int found = 0;
+    for (int i = 0; i < task_count; i++) {
+        if (strstr(tasks[i].description, keyword) != NULL || 
+            strstr(tasks[i].category, keyword) != NULL) {
+            print_task(tasks[i]);
+            found = 1;
+        }
+    }
+    
+    if (!found) {
+        printf("No tasks found matching '%s'.\n", keyword);
+    }
+}
+
+void generate_report() {
+    printf("\n--- TASK MANAGEMENT REPORT ---\n");
+    printf("Generated on: %02d/%02d/%d\n", 
+           get_current_date().day, 
+           get_current_date().month, 
+           get_current_date().year);
+    printf("Total Tasks: %d\n", task_count);
+    
+    int completed = 0, pending = 0;
+    int priority_count[6] = {0}; // indices 1-5
+    
+    for (int i = 0; i < task_count; i++) {
+        if (tasks[i].completed) completed++;
+        else pending++;
+        priority_count[tasks[i].priority]++;
+    }
+    
+    printf("Completed Tasks: %d\n", completed);
+    printf("Pending Tasks: %d\n", pending);
+    printf("Completion Rate: %.2f%%\n", task_count > 0 ? (completed * 100.0 / task_count) : 0);
+    
+    printf("\nPriority Distribution:\n");
+    for (int i = 1; i <= 5; i++) {
+        printf("Priority %d: %d tasks\n", i, priority_count[i]);
+    }
+    
+    // Overdue tasks
+    printf("\nOverdue Tasks:\n");
+    Date today = get_current_date();
+    int overdue_count = 0;
+    
+    for (int i = 0; i < task_count; i++) {
+        if (!tasks[i].completed && compare_dates(tasks[i].due_date, today) < 0) {
+            printf("  ID %d: %s (Due: %02d/%02d/%d)\n", 
+                   tasks[i].id, tasks[i].description,
+                   tasks[i].due_date.day, tasks[i].due_date.month, tasks[i].due_date.year);
+            overdue_count++;
+        }
+    }
+    
+    if (overdue_count == 0) {
+        printf("  No overdue tasks!\n");
+    }
+}
+
+void save_tasks() {
+    FILE *file = fopen(FILENAME, "w");
+    if (file == NULL) {
+        printf("Error saving tasks to file!\n");
+        return;
+    }
+    
+    fprintf(file, "%d\n", next_id);
+    fprintf(file, "%d\n", task_count);
+    
+    for (int i = 0; i < task_count; i++) {
+        fprintf(file, "%d|%s|%d|%d|%d|%d|%d|%d|%d|%s|%d\n",
+                tasks[i].id,
+                tasks[i].description,
+                tasks[i].priority,
+                tasks[i].due_date.day,
+                tasks[i].due_date.month,
+                tasks[i].due_date.year,
+                tasks[i].completed,
+                tasks[i].created_date.day,
+                tasks[i].created_date.month,
+                tasks[i].created_date.year,
+                tasks[i].category);
+    }
+    
+    fclose(file);
+}
+
+void load_tasks() {
+    FILE *file = fopen(FILENAME, "r");
+    if (file == NULL) {
+        printf("No previous data found. Starting fresh.\n");
+        return;
+    }
+    
+    fscanf(file, "%d", &next_id);
+    fscanf(file, "%d", &task_count);
+    
+    for (int i = 0; i < task_count; i++) {
+        fscanf(file, "%d|%[^|]|%d|%d|%d|%d|%d|%d|%d|%[^|]|%d\n",
+               &tasks[i].id,
+               tasks[i].description,
+               &tasks[i].priority,
+               &tasks[i].due_date.day,
+               &tasks[i].due_date.month,
+               &tasks[i].due_date.year,
+               &tasks[i].completed,
+               &tasks[i].created_date.day,
+               &tasks[i].created_date.month,
+               tasks[i].category,
+               &tasks[i].created_date.year);
+    }
+    
+    fclose(file);
+    printf("Previous data loaded successfully! (%d tasks)\n", task_count);
+}
+
+// Utility functions
+int validate_date(int day, int month, int year) {
+    if (year < 2020 || year > 2100) return 0;
+    if (month < 1 || month > 12) return 0;
+    if (day < 1 || day > 31) return 0;
+    
+    // Check for months with 30 days
+    if ((month == 4 || month == 6 || month == 9 || month == 11) && day > 30)
+        return 0;
+    
+    // Check for February
+    if (month == 2) {
+        int is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
+        if (day > (is_leap ? 29 : 28)) return 0;
+    }
+    
+    return 1;
+}
+
+Date get_current_date() {
+    time_t t = time(NULL);
+    struct tm tm = *localtime(&t);
+    Date current;
+    current.day = tm.tm_mday;
+    current.month = tm.tm_mon + 1;
+    current.year = tm.tm_year + 1900;
+    return current;
+}
+
+int compare_dates(Date d1, Date d2) {
+    if (d1.year != d2.year) return d1.year - d2.year;
+    if (d1.month != d2.month) return d1.month - d2.month;
+    return d1.day - d2.day;
+}
+
+void clear_input_buffer() {
+    int c;
+    while ((c = getchar()) != '\n' && c != EOF);
+}
+
+void print_task_header() {
+    printf("┌─────┬────────────────────────────┬──────────┬────────────┬─────────┬────────────┐\n");
+    printf("│ ID  │ Description                │ Priority │ Due Date   │ Status  │ Category   │\n");
+    printf("├─────┼────────────────────────────┼──────────┼────────────┼─────────┼────────────┤\n");
+}
+
+void print_task(Task task) {
+    char status[10];
+    strcpy(status, task.completed ? "Done" : "Pending");
+    
+    char due_date[12];
+    sprintf(due_date, "%02d/%02d/%d", task.due_date.day, task.due_date.month, task.due_date.year);
+    
+    // Truncate long descriptions
+    char desc[26];
+    strncpy(desc, task.description, 25);
+    desc[25] = '\0';
+    if (strlen(task.description) > 25) {
+        desc[22] = desc[23] = desc[24] = '.';
+    }
+    
+    printf("│ %-3d │ %-26s │ %-8d │ %-10s │ %-7s │ %-10s │\n",
+           task.id, desc, task.priority, due_date, status, task.category);
+    
+    // Print footer after last task
+    if (task.id == tasks[task_count-1].id) {
+        printf("└─────┴────────────────────────────┴──────────┴────────────┴─────────┴────────────┘\n");
+    }
+}
