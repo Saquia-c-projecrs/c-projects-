@@ -1,617 +1,489 @@
+/* medicine_tracker.c
+   Smart Medicine Reminder & Stock Tracker
+   Syllabus-only C program (structs, arrays, functions, switch-case, bitwise)
+   Headers: stdio.h, string.h
+   Compile: gcc medicine_tracker.c -o medicine_tracker
+   Run: ./medicine_tracker
+*/
+
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <ctype.h>
-#include <time.h>
 
-#define MAX_TASKS 100
-#define MAX_LENGTH 200
-#define FILENAME "todo_data.txt"
+#define MAX_MEDICINES 200
+#define MAX_NAME_LEN 50
+#define MAX_COMPANY_LEN 40
+#define MAX_BRANCH 50
 
-// Structure for Date
-typedef struct {
-    int day;
-    int month;
-    int year;
-} Date;
+/* Bit flags for medicine status */
+#define FLAG_AVAILABLE     0x01  /* 1 => available */
+#define FLAG_PRESCRIPTION  0x02  /* 1 => prescription required */
 
-// Structure for Task
+/* Medicine structure */
 typedef struct {
     int id;
-    char description[MAX_LENGTH];
-    int priority; // 1-5 where 5 is highest
-    Date due_date;
-    int completed;
-    char category[MAX_LENGTH];
-    Date created_date;
-} Task;
+    char name[MAX_NAME_LEN];
+    char company[MAX_COMPANY_LEN];
+    int quantity;
+    int expiryMonth;   /* 1..12 */
+    int expiryYear;    /* e.g., 2025 */
+    int price;         /* integer rupees */
+    int flags;         /* bitwise flags */
+} Medicine;
 
-// Global variables
-Task tasks[MAX_TASKS];
-int task_count = 0;
-int next_id = 1;
+/* Main storage and branch storage */
+static Medicine meds[MAX_MEDICINES];
+static int medCount = 0;
 
-// Function prototypes
-void display_menu();
-void add_task();
-void view_tasks();
-void view_tasks_by_priority();
-void view_tasks_by_category();
-void view_completed_tasks();
-void view_pending_tasks();
-void mark_task_complete();
-void delete_task();
-void edit_task();
-void search_tasks();
-void save_tasks();
-void load_tasks();
-void generate_report();
-int validate_date(int day, int month, int year);
-Date get_current_date();
-int compare_dates(Date d1, Date d2);
-void clear_input_buffer();
-void print_task_header();
-void print_task(Task task);
+static Medicine branchMeds[MAX_BRANCH];
+static int branchCount = 0;
 
-int main() {
-    load_tasks();
-    
-    printf("========================================\n");
-    printf("      TO-DO LIST MANAGER v2.0\n");
-    printf("========================================\n");
-    
-    int choice;
-    
-    do {
-        display_menu();
-        printf("Enter your choice (1-13): ");
-        
-        if (scanf("%d", &choice) != 1) {
-            printf("Invalid input! Please enter a number.\n");
-            clear_input_buffer();
+/* ---------- Utility prototypes ---------- */
+int readInt(const char prompt[], int min, int max);
+void readString(const char prompt[], char dest[], int maxlen);
+int findMedicineIndexById(int id);
+int findMedicineIndexByName(const char name[]);
+void swapMedicines(Medicine *a, Medicine *b);
+
+/* ---------- Feature prototypes ---------- */
+void populateSampleData(void);
+void addMedicines(void);
+void displayAllMedicines(void);
+void displayMedicine(int idx);
+void updateMedicineById(void);
+void deleteMedicineById(void);
+void searchByName(void);
+void searchByExpiry(void);
+void lowStockReminder(void);
+void expiryReminderForYear(int year);
+void sortByExpirySoonest(void);
+void sortByNameAsc(void);
+void toggleAvailabilityById(void);
+void mergeBranchIntoMain(void);
+void branchAddSample(void);
+void mergeIntegerArraysExcludingDuplicates(void);
+void swapWithoutThirdVariableDemo(void);
+void bitwiseOperationsDemo(void);
+
+/* ---------- Implementation ---------- */
+
+/* Read integer safely with bounds */
+int readInt(const char prompt[], int min, int max) {
+    int x;
+    int rc;
+    while (1) {
+        printf("%s", prompt);
+        rc = scanf("%d", &x);
+        if (rc != 1) {
+            while (getchar() != '\n'); /* flush invalid input */
+            printf("Invalid input. Please enter an integer.\n");
             continue;
         }
-        
-        clear_input_buffer();
-        
-        switch(choice) {
-            case 1:
-                add_task();
-                break;
-            case 2:
-                view_tasks();
-                break;
-            case 3:
-                view_tasks_by_priority();
-                break;
-            case 4:
-                view_tasks_by_category();
-                break;
-            case 5:
-                view_completed_tasks();
-                break;
-            case 6:
-                view_pending_tasks();
-                break;
-            case 7:
-                mark_task_complete();
-                break;
-            case 8:
-                delete_task();
-                break;
-            case 9:
-                edit_task();
-                break;
-            case 10:
-                search_tasks();
-                break;
-            case 11:
-                generate_report();
-                break;
-            case 12:
-                save_tasks();
-                printf("Tasks saved successfully!\n");
-                break;
-            case 13:
-                save_tasks();
-                printf("Thank you for using To-Do List Manager!\n");
-                break;
-            default:
-                printf("Invalid choice! Please try again.\n");
+        while (getchar() != '\n'); /* flush rest of line */
+        if (min <= max) {
+            if (x < min) { printf("Value too small, using %d\n", min); x = min; }
+            if (x > max) { printf("Value too large, using %d\n", max); x = max; }
         }
-        
-        printf("\nPress Enter to continue...");
-        getchar();
-        
-    } while(choice != 13);
-    
+        return x;
+    }
+}
+
+/* Read single-token string safely (no spaces) */
+void readString(const char prompt[], char dest[], int maxlen) {
+    printf("%s", prompt);
+    if (maxlen > 1) {
+        char fmt[16];
+        sprintf(fmt, "%%%ds", maxlen - 1);
+        scanf(fmt, dest);
+    } else {
+        scanf("%s", dest);
+    }
+    while (getchar() != '\n'); /* flush rest of line */
+}
+
+/* Find by ID */
+int findMedicineIndexById(int id) {
+    for (int i = 0; i < medCount; ++i) if (meds[i].id == id) return i;
+    return -1;
+}
+
+/* Find by exact name */
+int findMedicineIndexByName(const char name[]) {
+    for (int i = 0; i < medCount; ++i) if (strcmp(meds[i].name, name) == 0) return i;
+    return -1;
+}
+
+/* Swap two medicines (for sorting) */
+void swapMedicines(Medicine *a, Medicine *b) {
+    Medicine tmp = *a;
+    *a = *b;
+    *b = tmp;
+}
+
+/* ---------- Core Features ---------- */
+
+/* Populate sample data for quick testing */
+void populateSampleData(void) {
+    if (medCount > 0) {
+        printf("Sample data already present; not adding.\n");
+        return;
+    }
+    medCount = 5;
+    meds[0].id = 101; strcpy(meds[0].name, "Paracetamol"); strcpy(meds[0].company, "HealCo");
+    meds[0].quantity = 120; meds[0].expiryMonth = 11; meds[0].expiryYear = 2025; meds[0].price = 5; meds[0].flags = FLAG_AVAILABLE;
+
+    meds[1].id = 102; strcpy(meds[1].name, "Ibuprofen"); strcpy(meds[1].company, "CureLabs");
+    meds[1].quantity = 60; meds[1].expiryMonth = 4; meds[1].expiryYear = 2024; meds[1].price = 8; meds[1].flags = FLAG_AVAILABLE | FLAG_PRESCRIPTION;
+
+    meds[2].id = 103; strcpy(meds[2].name, "Cetirizine"); strcpy(meds[2].company, "Allergix");
+    meds[2].quantity = 10; meds[2].expiryMonth = 2; meds[2].expiryYear = 2024; meds[2].price = 3; meds[2].flags = FLAG_AVAILABLE;
+
+    meds[3].id = 104; strcpy(meds[3].name, "Amoxicillin"); strcpy(meds[3].company, "BioPharm");
+    meds[3].quantity = 0; meds[3].expiryMonth = 8; meds[3].expiryYear = 2023; meds[3].price = 12; meds[3].flags = 0;
+
+    meds[4].id = 105; strcpy(meds[4].name, "VitaminC"); strcpy(meds[4].company, "NutriPlus");
+    meds[4].quantity = 200; meds[4].expiryMonth = 6; meds[4].expiryYear = 2026; meds[4].price = 2; meds[4].flags = FLAG_AVAILABLE;
+
+    printf("Sample data added: 5 medicines (IDs 101..105).\n");
+}
+
+/* Add medicines interactively */
+void addMedicines(void) {
+    int n = readInt("How many medicines to add? ", 1, MAX_MEDICINES - medCount);
+    for (int i = 0; i < n; ++i) {
+        if (medCount >= MAX_MEDICINES) {
+            printf("Database full; cannot add more.\n");
+            break;
+        }
+        Medicine m;
+        m.id = readInt("Enter medicine id (integer): ", 1, 1000000);
+        if (findMedicineIndexById(m.id) != -1) {
+            printf("ID already exists. Skipping this entry.\n");
+            i--; /* try again for this count */
+            continue;
+        }
+        readString("Enter medicine name (no spaces): ", m.name, MAX_NAME_LEN);
+        readString("Enter company name (no spaces): ", m.company, MAX_COMPANY_LEN);
+        m.quantity = readInt("Enter quantity in stock: ", 0, 1000000);
+        m.expiryMonth = readInt("Enter expiry month (1-12): ", 1, 12);
+        m.expiryYear = readInt("Enter expiry year (e.g., 2025): ", 2020, 9999);
+        m.price = readInt("Enter price per unit (integer): ", 0, 1000000);
+        printf("Is this prescription-only? 1=Yes 0=No: ");
+        { int pres; scanf("%d", &pres); while (getchar() != '\n'); if (pres) m.flags = FLAG_PRESCRIPTION; else m.flags = 0; }
+        if (m.quantity > 0) m.flags |= FLAG_AVAILABLE;
+        meds[medCount++] = m;
+        printf("Medicine added. Current total: %d\n", medCount);
+    }
+}
+
+/* Display a single medicine (by index) */
+void displayMedicine(int idx) {
+    if (idx < 0 || idx >= medCount) return;
+    Medicine *m = &meds[idx];
+    printf("ID: %d\n", m->id);
+    printf("Name: %s\n", m->name);
+    printf("Company: %s\n", m->company);
+    printf("Quantity: %d\n", m->quantity);
+    printf("Expiry: %02d/%04d\n", m->expiryMonth, m->expiryYear);
+    printf("Price: %d\n", m->price);
+    printf("Flags: ");
+    if (m->flags & FLAG_AVAILABLE) printf("Available ");
+    else printf("NotAvailable ");
+    if (m->flags & FLAG_PRESCRIPTION) printf("| Prescription");
+    printf("\n");
+}
+
+/* Display all medicines in tabular form */
+void displayAllMedicines(void) {
+    if (medCount == 0) {
+        printf("No medicines in database.\n");
+        return;
+    }
+    printf("\nNo ID     Name                 Company          Qty  Expiry    Price Avl Pres\n");
+    for (int i = 0; i < medCount; ++i) {
+        Medicine *m = &meds[i];
+        printf("%-3d %-6d %-20s %-15s %-4d  %02d/%04d  %-5d  %c   %c\n",
+               i+1, m->id, m->name, m->company, m->quantity,
+               m->expiryMonth, m->expiryYear, m->price,
+               (m->flags & FLAG_AVAILABLE) ? 'Y' : 'N',
+               (m->flags & FLAG_PRESCRIPTION) ? 'Y' : 'N');
+    }
+}
+
+/* Update medicine by id */
+void updateMedicineById(void) {
+    if (medCount == 0) { printf("No medicines to update.\n"); return; }
+    int id = readInt("Enter medicine id to update: ", 1, 1000000);
+    int idx = findMedicineIndexById(id);
+    if (idx == -1) { printf("Medicine with id %d not found.\n", id); return; }
+    Medicine *m = &meds[idx];
+    printf("Updating medicine ID %d (%s)\n", m->id, m->name);
+    int choice = readInt("Which field? 1:Name 2:Company 3:Quantity 4:Expiry 5:Price 6:Toggle Prescription 7:Back : ", 1, 7);
+    if (choice == 1) {
+        readString("Enter new name: ", m->name, MAX_NAME_LEN);
+    } else if (choice == 2) {
+        readString("Enter new company: ", m->company, MAX_COMPANY_LEN);
+    } else if (choice == 3) {
+        int q = readInt("Enter new quantity: ", 0, 1000000);
+        m->quantity = q;
+        if (q > 0) m->flags |= FLAG_AVAILABLE; else m->flags &= ~FLAG_AVAILABLE;
+    } else if (choice == 4) {
+        m->expiryMonth = readInt("Enter new expiry month (1-12): ", 1, 12);
+        m->expiryYear = readInt("Enter new expiry year: ", 2020, 9999);
+    } else if (choice == 5) {
+        m->price = readInt("Enter new price: ", 0, 1000000);
+    } else if (choice == 6) {
+        m->flags ^= FLAG_PRESCRIPTION; /* toggle */
+        printf("Prescription flag toggled.\n");
+    } else {
+        printf("Back to menu.\n");
+    }
+    printf("Update complete for id %d.\n", m->id);
+}
+
+/* Delete medicine by id */
+void deleteMedicineById(void) {
+    if (medCount == 0) { printf("No medicines to delete.\n"); return; }
+    int id = readInt("Enter medicine id to delete: ", 1, 1000000);
+    int idx = findMedicineIndexById(id);
+    if (idx == -1) { printf("Medicine with id %d not found.\n", id); return; }
+    for (int i = idx; i < medCount - 1; ++i) meds[i] = meds[i+1];
+    medCount--;
+    printf("Medicine id %d deleted.\n", id);
+}
+
+/* Search by exact name */
+void searchByName(void) {
+    if (medCount == 0) { printf("Database empty.\n"); return; }
+    char q[MAX_NAME_LEN];
+    readString("Enter exact name to search: ", q, MAX_NAME_LEN);
+    int idx = findMedicineIndexByName(q);
+    if (idx == -1) { printf("Medicine '%s' not found.\n", q); return; }
+    displayMedicine(idx);
+}
+
+/* Search by expiry (month/year filter) */
+void searchByExpiry(void) {
+    if (medCount == 0) { printf("Database empty.\n"); return; }
+    int month = readInt("Enter expiry month (1-12) or 0 to skip month: ", 0, 12);
+    int year = readInt("Enter expiry year (e.g., 2024) or 0 to skip year: ", 0, 9999);
+    int found = 0;
+    for (int i = 0; i < medCount; ++i) {
+        int ok = 1;
+        if (month != 0 && meds[i].expiryMonth != month) ok = 0;
+        if (year != 0 && meds[i].expiryYear != year) ok = 0;
+        if (ok) {
+            displayMedicine(i);
+            found = 1;
+        }
+    }
+    if (!found) printf("No medicines match the expiry filter.\n");
+}
+
+/* Low-stock reminder */
+void lowStockReminder(void) {
+    if (medCount == 0) { printf("Database empty.\n"); return; }
+    int thresh = readInt("Enter low-stock threshold (e.g., 20): ", 0, 1000000);
+    int found = 0;
+    for (int i = 0; i < medCount; ++i) {
+        if (meds[i].quantity <= thresh) {
+            printf("Low stock: ID %d Name %s Qty %d\n", meds[i].id, meds[i].name, meds[i].quantity);
+            found = 1;
+        }
+    }
+    if (!found) printf("No medicines with quantity <= %d\n", thresh);
+}
+
+/* Expiry reminder for a given year (on or before) */
+void expiryReminderForYear(int year) {
+    if (medCount == 0) { printf("Database empty.\n"); return; }
+    int found = 0;
+    for (int i = 0; i < medCount; ++i) {
+        if (meds[i].expiryYear <= year) {
+            printf("Expiring on/before %d: ID %d Name %s Expiry %02d/%04d\n",
+                   year, meds[i].id, meds[i].name, meds[i].expiryMonth, meds[i].expiryYear);
+            found = 1;
+        }
+    }
+    if (!found) printf("No medicines expiring on/before %d\n", year);
+}
+
+/* Sort by expiry soonest (year then month) */
+void sortByExpirySoonest(void) {
+    if (medCount < 2) { printf("Not enough medicines to sort.\n"); return; }
+    for (int i = 0; i < medCount - 1; ++i) {
+        for (int j = i + 1; j < medCount; ++j) {
+            if (meds[j].expiryYear < meds[i].expiryYear ||
+               (meds[j].expiryYear == meds[i].expiryYear && meds[j].expiryMonth < meds[i].expiryMonth)) {
+                swapMedicines(&meds[i], &meds[j]);
+            }
+        }
+    }
+    printf("Sorted by expiry date (soonest first).\n");
+}
+
+/* Sort by name ascending */
+void sortByNameAsc(void) {
+    if (medCount < 2) { printf("Not enough medicines to sort.\n"); return; }
+    for (int i = 0; i < medCount - 1; ++i) {
+        for (int j = i + 1; j < medCount; ++j) {
+            if (strcmp(meds[i].name, meds[j].name) > 0) swapMedicines(&meds[i], &meds[j]);
+        }
+    }
+    printf("Sorted by name (A-Z).\n");
+}
+
+/* Toggle availability flag by id */
+void toggleAvailabilityById(void) {
+    if (medCount == 0) { printf("No medicines.\n"); return; }
+    int id = readInt("Enter medicine id to toggle availability: ", 1, 1000000);
+    int idx = findMedicineIndexById(id);
+    if (idx == -1) { printf("Not found.\n"); return; }
+    meds[idx].flags ^= FLAG_AVAILABLE; /* toggle bit */
+    printf("Toggled availability for id %d. Now %s\n", id, (meds[idx].flags & FLAG_AVAILABLE) ? "Available" : "Not Available");
+}
+
+/* Branch sample data for merge demo */
+void branchAddSample(void) {
+    branchCount = 3;
+    branchMeds[0].id = 201; strcpy(branchMeds[0].name, "Dolo650"); strcpy(branchMeds[0].company, "MediCorp");
+    branchMeds[0].quantity = 50; branchMeds[0].expiryMonth = 12; branchMeds[0].expiryYear = 2025; branchMeds[0].price = 6; branchMeds[0].flags = FLAG_AVAILABLE;
+
+    branchMeds[1].id = 202; strcpy(branchMeds[1].name, "Paracetamol"); strcpy(branchMeds[1].company, "HealCo");
+    branchMeds[1].quantity = 30; branchMeds[1].expiryMonth = 10; branchMeds[1].expiryYear = 2024; branchMeds[1].price = 5; branchMeds[1].flags = FLAG_AVAILABLE;
+
+    branchMeds[2].id = 203; strcpy(branchMeds[2].name, "Zincovit"); strcpy(branchMeds[2].company, "NutraLife");
+    branchMeds[2].quantity = 90; branchMeds[2].expiryMonth = 6; branchMeds[2].expiryYear = 2026; branchMeds[2].price = 15; branchMeds[2].flags = FLAG_AVAILABLE;
+
+    printf("Branch sample data added (3 items).\n");
+}
+
+/* Merge branch into main excluding duplicates by name */
+void mergeBranchIntoMain(void) {
+    if (branchCount == 0) { printf("Branch list empty. Use branch sample add or manual entry first.\n"); return; }
+    for (int i = 0; i < branchCount; ++i) {
+        int dup = 0;
+        for (int j = 0; j < medCount; ++j) {
+            if (strcmp(branchMeds[i].name, meds[j].name) == 0) { dup = 1; break; }
+        }
+        if (dup) {
+            printf("Duplicate '%s' skipped.\n", branchMeds[i].name);
+            continue;
+        }
+        if (medCount >= MAX_MEDICINES) { printf("Main DB full; cannot merge more.\n"); break; }
+        meds[medCount++] = branchMeds[i];
+        printf("Merged '%s' into main DB.\n", branchMeds[i].name);
+    }
+    printf("Merge complete. Main med count: %d\n", medCount);
+}
+
+/* Merge integer arrays excluding duplicates - small exercise from lab */
+void mergeIntegerArraysExcludingDuplicates(void) {
+    int n1 = readInt("Enter size of first array: ", 0, 100);
+    int a[200];
+    for (int i = 0; i < n1; ++i) {
+        char p[40]; sprintf(p, "a[%d]: ", i);
+        a[i] = readInt(p, -1000000, 1000000);
+    }
+    int n2 = readInt("Enter size of second array: ", 0, 100);
+    int b[200];
+    for (int i = 0; i < n2; ++i) {
+        char p[40]; sprintf(p, "b[%d]: ", i);
+        b[i] = readInt(p, -1000000, 1000000);
+    }
+    int res[400]; int rsize = 0;
+    for (int i = 0; i < n1; ++i) {
+        int v = a[i], found = 0;
+        for (int j = 0; j < rsize; ++j) if (res[j] == v) { found = 1; break; }
+        if (!found) res[rsize++] = v;
+    }
+    for (int i = 0; i < n2; ++i) {
+        int v = b[i], found = 0;
+        for (int j = 0; j < rsize; ++j) if (res[j] == v) { found = 1; break; }
+        if (!found) res[rsize++] = v;
+    }
+    printf("Merged array excluding duplicates (size=%d):\n", rsize);
+    for (int i = 0; i < rsize; ++i) printf("%d ", res[i]);
+    printf("\n");
+}
+
+/* Swap demo (no third variable) */
+void swapWithoutThirdVariableDemo(void) {
+    int a = readInt("Enter a: ", -1000000, 1000000);
+    int b = readInt("Enter b: ", -1000000, 1000000);
+    printf("Before: a=%d b=%d\n", a, b);
+    a = a + b;
+    b = a - b;
+    a = a - b;
+    printf("After:  a=%d b=%d\n", a, b);
+}
+
+/* Bitwise AND/OR/XOR demo and smallest result */
+void bitwiseOperationsDemo(void) {
+    int x = readInt("Enter first integer: ", -1000000, 1000000);
+    int y = readInt("Enter second integer: ", -1000000, 1000000);
+    int andv = x & y;
+    int orv = x | y;
+    int xorv = x ^ y;
+    printf("AND = %d, OR = %d, XOR = %d\n", andv, orv, xorv);
+    int smallest = andv;
+    if (orv < smallest) smallest = orv;
+    if (xorv < smallest) smallest = xorv;
+    printf("Smallest among AND/OR/XOR is %d\n", smallest);
+}
+
+/* ---------- Main menu ---------- */
+void mainMenu(void) {
+    int choice;
+    printf("Smart Medicine Reminder & Stock Tracker\n");
+    printf("Use option 0 to populate sample data for quick testing.\n");
+    do {
+        printf("\nMain Menu\n");
+        printf("0. Populate sample data (quick test)\n");
+        printf("1. Add medicines\n");
+        printf("2. Display all medicines\n");
+        printf("3. Update medicine by id\n");
+        printf("4. Delete medicine by id\n");
+        printf("5. Search by name\n");
+        printf("6. Search by expiry (month/year)\n");
+        printf("7. Low-stock reminder\n");
+        printf("8. Expiry reminder (by year)\n");
+        printf("9. Sort by expiry (soonest)\n");
+        printf("10. Sort by name (A-Z)\n");
+        printf("11. Toggle availability (bitwise)\n");
+        printf("12. Merge branch data into main\n");
+        printf("13. Add branch sample data (for merge)\n");
+        printf("14. Merge integer arrays excluding duplicates (lab exercise)\n");
+        printf("15. Swap without third variable demo\n");
+        printf("16. Bitwise AND/OR/XOR demo\n");
+        printf("17. Exit\n");
+        choice = readInt("Enter choice: ", 0, 17);
+        switch (choice) {
+            case 0: populateSampleData(); break;
+            case 1: addMedicines(); break;
+            case 2: displayAllMedicines(); break;
+            case 3: updateMedicineById(); break;
+            case 4: deleteMedicineById(); break;
+            case 5: searchByName(); break;
+            case 6: searchByExpiry(); break;
+            case 7: lowStockReminder(); break;
+            case 8: { int y = readInt("Enter year to check expiry on/before: ", 2020, 9999); expiryReminderForYear(y); break; }
+            case 9: sortByExpirySoonest(); break;
+            case 10: sortByNameAsc(); break;
+            case 11: toggleAvailabilityById(); break;
+            case 12: mergeBranchIntoMain(); break;
+            case 13: branchAddSample(); break;
+            case 14: mergeIntegerArraysExcludingDuplicates(); break;
+            case 15: swapWithoutThirdVariableDemo(); break;
+            case 16: bitwiseOperationsDemo(); break;
+            case 17: printf("Exiting program.\n"); break;
+            default: printf("Invalid choice.\n"); break;
+        }
+    } while (choice != 17);
+}
+
+/* ---------- Entry point ---------- */
+int main(void) {
+    mainMenu();
     return 0;
 }
 
-void display_menu() {
-    printf("\n========================================\n");
-    printf("              MAIN MENU\n");
-    printf("========================================\n");
-    printf("1. Add New Task\n");
-    printf("2. View All Tasks\n");
-    printf("3. View Tasks by Priority\n");
-    printf("4. View Tasks by Category\n");
-    printf("5. View Completed Tasks\n");
-    printf("6. View Pending Tasks\n");
-    printf("7. Mark Task as Complete\n");
-    printf("8. Delete Task\n");
-    printf("9. Edit Task\n");
-    printf("10. Search Tasks\n");
-    printf("11. Generate Report\n");
-    printf("12. Save Tasks\n");
-    printf("13. Exit\n");
-    printf("========================================\n");
-}
-
-void add_task() {
-    if (task_count >= MAX_TASKS) {
-        printf("Task limit reached! Cannot add more tasks.\n");
-        return;
-    }
-    
-    Task new_task;
-    new_task.id = next_id++;
-    new_task.completed = 0;
-    new_task.created_date = get_current_date();
-    
-    printf("\n--- Add New Task ---\n");
-    
-    // Get task description
-    printf("Enter task description: ");
-    fgets(new_task.description, MAX_LENGTH, stdin);
-    new_task.description[strcspn(new_task.description, "\n")] = 0;
-    
-    if (strlen(new_task.description) == 0) {
-        printf("Task description cannot be empty!\n");
-        return;
-    }
-    
-    // Get priority
-    printf("Enter priority (1-5, where 5 is highest): ");
-    scanf("%d", &new_task.priority);
-    clear_input_buffer();
-    
-    if (new_task.priority < 1 || new_task.priority > 5) {
-        printf("Invalid priority! Setting to default (3).\n");
-        new_task.priority = 3;
-    }
-    
-    // Get category
-    printf("Enter category: ");
-    fgets(new_task.category, MAX_LENGTH, stdin);
-    new_task.category[strcspn(new_task.category, "\n")] = 0;
-    
-    if (strlen(new_task.category) == 0) {
-        strcpy(new_task.category, "General");
-    }
-    
-    // Get due date
-    printf("Enter due date (DD MM YYYY): ");
-    int day, month, year;
-    scanf("%d %d %d", &day, &month, &year);
-    clear_input_buffer();
-    
-    if (validate_date(day, month, year)) {
-        new_task.due_date.day = day;
-        new_task.due_date.month = month;
-        new_task.due_date.year = year;
-    } else {
-        printf("Invalid date! Setting to current date.\n");
-        new_task.due_date = get_current_date();
-    }
-    
-    tasks[task_count++] = new_task;
-    printf("Task added successfully! (ID: %d)\n", new_task.id);
-}
-
-void view_tasks() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    printf("\n--- All Tasks ---\n");
-    print_task_header();
-    
-    for (int i = 0; i < task_count; i++) {
-        print_task(tasks[i]);
-    }
-}
-
-void view_tasks_by_priority() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    int priority;
-    printf("Enter priority level to view (1-5): ");
-    scanf("%d", &priority);
-    clear_input_buffer();
-    
-    if (priority < 1 || priority > 5) {
-        printf("Invalid priority level!\n");
-        return;
-    }
-    
-    printf("\n--- Tasks with Priority %d ---\n", priority);
-    print_task_header();
-    
-    int found = 0;
-    for (int i = 0; i < task_count; i++) {
-        if (tasks[i].priority == priority) {
-            print_task(tasks[i]);
-            found = 1;
-        }
-    }
-    
-    if (!found) {
-        printf("No tasks found with priority %d.\n", priority);
-    }
-}
-
-void view_tasks_by_category() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    char category[MAX_LENGTH];
-    printf("Enter category to view: ");
-    fgets(category, MAX_LENGTH, stdin);
-    category[strcspn(category, "\n")] = 0;
-    
-    printf("\n--- Tasks in Category: %s ---\n", category);
-    print_task_header();
-    
-    int found = 0;
-    for (int i = 0; i < task_count; i++) {
-        if (strcasecmp(tasks[i].category, category) == 0) {
-            print_task(tasks[i]);
-            found = 1;
-        }
-    }
-    
-    if (!found) {
-        printf("No tasks found in category '%s'.\n", category);
-    }
-}
-
-void view_completed_tasks() {
-    printf("\n--- Completed Tasks ---\n");
-    print_task_header();
-    
-    int found = 0;
-    for (int i = 0; i < task_count; i++) {
-        if (tasks[i].completed) {
-            print_task(tasks[i]);
-            found = 1;
-        }
-    }
-    
-    if (!found) {
-        printf("No completed tasks found.\n");
-    }
-}
-
-void view_pending_tasks() {
-    printf("\n--- Pending Tasks ---\n");
-    print_task_header();
-    
-    int found = 0;
-    for (int i = 0; i < task_count; i++) {
-        if (!tasks[i].completed) {
-            print_task(tasks[i]);
-            found = 1;
-        }
-    }
-    
-    if (!found) {
-        printf("No pending tasks found.\n");
-    }
-}
-
-void mark_task_complete() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    int id;
-    printf("Enter task ID to mark as complete: ");
-    scanf("%d", &id);
-    clear_input_buffer();
-    
-    for (int i = 0; i < task_count; i++) {
-        if (tasks[i].id == id) {
-            if (tasks[i].completed) {
-                printf("Task is already completed!\n");
-            } else {
-                tasks[i].completed = 1;
-                printf("Task marked as complete!\n");
-            }
-            return;
-        }
-    }
-    
-    printf("Task with ID %d not found!\n", id);
-}
-
-void delete_task() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    int id;
-    printf("Enter task ID to delete: ");
-    scanf("%d", &id);
-    clear_input_buffer();
-    
-    for (int i = 0; i < task_count; i++) {
-        if (tasks[i].id == id) {
-            // Shift tasks to fill the gap
-            for (int j = i; j < task_count - 1; j++) {
-                tasks[j] = tasks[j + 1];
-            }
-            task_count--;
-            printf("Task deleted successfully!\n");
-            return;
-        }
-    }
-    
-    printf("Task with ID %d not found!\n", id);
-}
-
-void edit_task() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    int id;
-    printf("Enter task ID to edit: ");
-    scanf("%d", &id);
-    clear_input_buffer();
-    
-    for (int i = 0; i < task_count; i++) {
-        if (tasks[i].id == id) {
-            printf("\nEditing Task ID: %d\n", id);
-            printf("Current description: %s\n", tasks[i].description);
-            printf("Enter new description (or press Enter to keep current): ");
-            char new_desc[MAX_LENGTH];
-            fgets(new_desc, MAX_LENGTH, stdin);
-            new_desc[strcspn(new_desc, "\n")] = 0;
-            
-            if (strlen(new_desc) > 0) {
-                strcpy(tasks[i].description, new_desc);
-            }
-            
-            printf("Current priority: %d\n", tasks[i].priority);
-            printf("Enter new priority (1-5): ");
-            char priority_input[10];
-            fgets(priority_input, 10, stdin);
-            if (strlen(priority_input) > 1) {
-                int new_priority = atoi(priority_input);
-                if (new_priority >= 1 && new_priority <= 5) {
-                    tasks[i].priority = new_priority;
-                }
-            }
-            
-            printf("Task updated successfully!\n");
-            return;
-        }
-    }
-    
-    printf("Task with ID %d not found!\n", id);
-}
-
-void search_tasks() {
-    if (task_count == 0) {
-        printf("No tasks available!\n");
-        return;
-    }
-    
-    char keyword[MAX_LENGTH];
-    printf("Enter search keyword: ");
-    fgets(keyword, MAX_LENGTH, stdin);
-    keyword[strcspn(keyword, "\n")] = 0;
-    
-    if (strlen(keyword) == 0) {
-        printf("Search keyword cannot be empty!\n");
-        return;
-    }
-    
-    printf("\n--- Search Results for '%s' ---\n", keyword);
-    print_task_header();
-    
-    int found = 0;
-    for (int i = 0; i < task_count; i++) {
-        if (strstr(tasks[i].description, keyword) != NULL || 
-            strstr(tasks[i].category, keyword) != NULL) {
-            print_task(tasks[i]);
-            found = 1;
-        }
-    }
-    
-    if (!found) {
-        printf("No tasks found matching '%s'.\n", keyword);
-    }
-}
-
-void generate_report() {
-    printf("\n--- TASK MANAGEMENT REPORT ---\n");
-    printf("Generated on: %02d/%02d/%d\n", 
-           get_current_date().day, 
-           get_current_date().month, 
-           get_current_date().year);
-    printf("Total Tasks: %d\n", task_count);
-    
-    int completed = 0, pending = 0;
-    int priority_count[6] = {0}; // indices 1-5
-    
-    for (int i = 0; i < task_count; i++) {
-        if (tasks[i].completed) completed++;
-        else pending++;
-        priority_count[tasks[i].priority]++;
-    }
-    
-    printf("Completed Tasks: %d\n", completed);
-    printf("Pending Tasks: %d\n", pending);
-    printf("Completion Rate: %.2f%%\n", task_count > 0 ? (completed * 100.0 / task_count) : 0);
-    
-    printf("\nPriority Distribution:\n");
-    for (int i = 1; i <= 5; i++) {
-        printf("Priority %d: %d tasks\n", i, priority_count[i]);
-    }
-    
-    // Overdue tasks
-    printf("\nOverdue Tasks:\n");
-    Date today = get_current_date();
-    int overdue_count = 0;
-    
-    for (int i = 0; i < task_count; i++) {
-        if (!tasks[i].completed && compare_dates(tasks[i].due_date, today) < 0) {
-            printf("  ID %d: %s (Due: %02d/%02d/%d)\n", 
-                   tasks[i].id, tasks[i].description,
-                   tasks[i].due_date.day, tasks[i].due_date.month, tasks[i].due_date.year);
-            overdue_count++;
-        }
-    }
-    
-    if (overdue_count == 0) {
-        printf("  No overdue tasks!\n");
-    }
-}
-
-void save_tasks() {
-    FILE *file = fopen(FILENAME, "w");
-    if (file == NULL) {
-        printf("Error saving tasks to file!\n");
-        return;
-    }
-    
-    fprintf(file, "%d\n", next_id);
-    fprintf(file, "%d\n", task_count);
-    
-    for (int i = 0; i < task_count; i++) {
-        fprintf(file, "%d|%s|%d|%d|%d|%d|%d|%d|%d|%s|%d\n",
-                tasks[i].id,
-                tasks[i].description,
-                tasks[i].priority,
-                tasks[i].due_date.day,
-                tasks[i].due_date.month,
-                tasks[i].due_date.year,
-                tasks[i].completed,
-                tasks[i].created_date.day,
-                tasks[i].created_date.month,
-                tasks[i].created_date.year,
-                tasks[i].category);
-    }
-    
-    fclose(file);
-}
-
-void load_tasks() {
-    FILE *file = fopen(FILENAME, "r");
-    if (file == NULL) {
-        printf("No previous data found. Starting fresh.\n");
-        return;
-    }
-    
-    fscanf(file, "%d", &next_id);
-    fscanf(file, "%d", &task_count);
-    
-    for (int i = 0; i < task_count; i++) {
-        fscanf(file, "%d|%[^|]|%d|%d|%d|%d|%d|%d|%d|%[^|]|%d\n",
-               &tasks[i].id,
-               tasks[i].description,
-               &tasks[i].priority,
-               &tasks[i].due_date.day,
-               &tasks[i].due_date.month,
-               &tasks[i].due_date.year,
-               &tasks[i].completed,
-               &tasks[i].created_date.day,
-               &tasks[i].created_date.month,
-               tasks[i].category,
-               &tasks[i].created_date.year);
-    }
-    
-    fclose(file);
-    printf("Previous data loaded successfully! (%d tasks)\n", task_count);
-}
-
-// Utility functions
-int validate_date(int day, int month, int year) {
-    if (year < 2020 || year > 2100) return 0;
-    if (month < 1 || month > 12) return 0;
-    if (day < 1 || day > 31) return 0;
-    
-    // Check for months with 30 days
-    if ((month == 4 || month == 6 || month == 9 || month == 11) && day > 30)
-        return 0;
-    
-    // Check for February
-    if (month == 2) {
-        int is_leap = (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0);
-        if (day > (is_leap ? 29 : 28)) return 0;
-    }
-    
-    return 1;
-}
-
-Date get_current_date() {
-    time_t t = time(NULL);
-    struct tm tm = *localtime(&t);
-    Date current;
-    current.day = tm.tm_mday;
-    current.month = tm.tm_mon + 1;
-    current.year = tm.tm_year + 1900;
-    return current;
-}
-
-int compare_dates(Date d1, Date d2) {
-    if (d1.year != d2.year) return d1.year - d2.year;
-    if (d1.month != d2.month) return d1.month - d2.month;
-    return d1.day - d2.day;
-}
-
-void clear_input_buffer() {
-    int c;
-    while ((c = getchar()) != '\n' && c != EOF);
-}
-
-void print_task_header() {
-    printf("┌─────┬────────────────────────────┬──────────┬────────────┬─────────┬────────────┐\n");
-    printf("│ ID  │ Description                │ Priority │ Due Date   │ Status  │ Category   │\n");
-    printf("├─────┼────────────────────────────┼──────────┼────────────┼─────────┼────────────┤\n");
-}
-
-void print_task(Task task) {
-    char status[10];
-    strcpy(status, task.completed ? "Done" : "Pending");
-    
-    char due_date[12];
-    sprintf(due_date, "%02d/%02d/%d", task.due_date.day, task.due_date.month, task.due_date.year);
-    
-    // Truncate long descriptions
-    char desc[26];
-    strncpy(desc, task.description, 25);
-    desc[25] = '\0';
-    if (strlen(task.description) > 25) {
-        desc[22] = desc[23] = desc[24] = '.';
-    }
-    
-    printf("│ %-3d │ %-26s │ %-8d │ %-10s │ %-7s │ %-10s │\n",
-           task.id, desc, task.priority, due_date, status, task.category);
-    
-    // Print footer after last task
-    if (task.id == tasks[task_count-1].id) {
-        printf("└─────┴────────────────────────────┴──────────┴────────────┴─────────┴────────────┘\n");
-    }
-}
